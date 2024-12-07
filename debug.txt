@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "env": {
+                "MY_ENV_VAR": "value"
+            },
+            "args": [
+                "arg1",
+                "arg2"
+            ],
+            "justMyCode": true
+        }
+    ]
+}
