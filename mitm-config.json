@@ -1,0 +1,55 @@
+{
+    "chary.p": {
+        "allowed_domains": [
+            "soft98.ir"
+        ],
+        "blocked_extensions": [
+            "apk",
+            "rar",
+            "exe",
+            "iso",
+            "mp3",
+            "tar",
+            "gz",
+            "7z",
+            "dmg"
+        ],
+        "message": "Only ZIP files are allowed for download from soft98.ir and dl.soft98.ir."
+    },
+    "kamali.m": {
+        "allowed_domains": [
+            "digiboy.ir"
+        ],
+        "blocked_extensions": [
+            "rar",
+            "exe",
+            "apk",
+            "zip",
+            "tar",
+            "gz",
+            "mp3",
+            "jpg",
+            "png",
+            "img"
+        ],
+        "message": "Only ISO files are allowed for download from digiboy.ir."
+    },
+    "chary.m": {
+        "allowed_domains": [],
+        "blocked_extensions": [
+            "apk",
+            "rar",
+            "exe",
+            "iso",
+            "mp3",
+            "tar",
+            "gz",
+            "7z",
+            "dmg"
+        ],
+        "message": "Only ZIP files are allowed for download.",
+        "blocked_domains": [
+            "yasdl.com"
+        ]
+    }
+}
