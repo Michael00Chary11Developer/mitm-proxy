@@ -1,24 +1,37 @@
 from mitmproxy import http, ctx
 from ldap3 import Server, Connection, ALL, SUBTREE
+from typing import Dict, Optional
+from identity import config
 import base64
 import re
 from dotenv import load_dotenv
 import os
 import uuid
 import time
-from typing import Dict, Optional
+
 
 load_dotenv()
 
-LDAP_SERVER = os.getenv("LDAP_SERVER")
-BASE_DN = os.getenv("BASE_DN")
-ADMIN_DN = os.getenv("ADMIN_DN")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+LDAP_SERVER = os.getenv("CONF_LDAP_SERVER")
+BASE_DN = os.getenv("CONF_BASE_DN")
+ADMIN_DN = os.getenv("CONF_ADMIN_DN")
+ADMIN_PASSWORD = os.getenv("CONF_ADMIN_PASSWORD")
+
+# LDAP_SERVER = config['LDAP_SERVER']
+# BASE_DN = config['BASE_DN']
+# ADMIN_DN = config['ADMIN_DN']
+# ADMIN_PASSWORD = config['ADMIN_PASSWORD']
+
+# LDAP_SERVER = "ldap://192.168.10.1:389"
+# BASE_DN = "ou=npdco,dc=npdco,dc=local"
+# ADMIN_DN = "CN=***************OU=NPDCO,DC=npdco,DC=local"
+# ADMIN_PASSWORD = '****************'
 
 SESSION_DURATION = 86400
 session_store: Dict[str, dict] = {}
 
-BYPASS_EXTENSIONS = {'.css', '.js', '.jpg', '.jpeg', '.png', '.gif', '.ico', '.woff', '.woff2'}
+BYPASS_EXTENSIONS = {'.css', '.js', '.jpg', '.jpeg',
+                     '.png', '.gif', '.ico', '.woff', '.woff2'}
 
 USER_CONFIGS = {
     "chary.p": {
@@ -38,6 +51,7 @@ USER_CONFIGS = {
         "blocked_domains": ["yasdl.com"]
     }
 }
+
 
 class ProxySession:
     def __init__(self):
@@ -61,10 +75,11 @@ class ProxySession:
 
     def clear_expired_sessions(self) -> None:
         current_time = time.time()
-        expired_ips = [ip for ip, session in self.authenticated_ips.items() 
-                      if current_time > session["expires_at"]]
+        expired_ips = [ip for ip, session in self.authenticated_ips.items()
+                       if current_time > session["expires_at"]]
         for ip in expired_ips:
             del self.authenticated_ips[ip]
+
 
 def authenticate_with_ldap(username: str, password: str) -> bool:
     try:
@@ -75,10 +90,10 @@ def authenticate_with_ldap(username: str, password: str) -> bool:
 
         search_filter = f"(sAMAccountName={username})"
         admin_conn.search(BASE_DN, search_filter, SUBTREE)
-        
+
         if not admin_conn.entries:
             return False
-            
+
         user_dn = admin_conn.entries[0].entry_dn
         user_conn = Connection(server, user_dn, password)
         return user_conn.bind()
@@ -86,20 +101,24 @@ def authenticate_with_ldap(username: str, password: str) -> bool:
         print(f"LDAP authentication error: {e}")
         return False
 
+
 def extract_credentials(auth_header: str) -> tuple[Optional[str], Optional[str]]:
     if auth_header and auth_header.startswith("Basic "):
         try:
             encoded_credentials = auth_header[6:]
-            decoded_credentials = base64.b64decode(encoded_credentials).decode("utf-8")
+            decoded_credentials = base64.b64decode(
+                encoded_credentials).decode("utf-8")
             return decoded_credentials.split(":", 1)
         except Exception:
             return None, None
     return None, None
 
+
 def should_bypass_auth(flow: http.HTTPFlow) -> bool:
     """Check if the request should bypass authentication"""
     url = flow.request.pretty_url.lower()
     return any(url.endswith(ext) for ext in BYPASS_EXTENSIONS)
+
 
 def process_user_restrictions(flow: http.HTTPFlow, username: str) -> Optional[http.Response]:
     if username not in USER_CONFIGS:
@@ -120,7 +139,7 @@ def process_user_restrictions(flow: http.HTTPFlow, username: str) -> Optional[ht
     if allowed_domains:
         if not any(domain in flow.request.host for domain in allowed_domains):
             return None
-        
+
         match = re.search(r'\.([a-zA-Z0-9]+)(\?.*)?$', flow.request.pretty_url)
         if match and match.group(1).lower() in blocked_extensions:
             return http.Response.make(
@@ -131,7 +150,9 @@ def process_user_restrictions(flow: http.HTTPFlow, username: str) -> Optional[ht
 
     return None
 
+
 proxy_session = ProxySession()
+
 
 def request(flow: http.HTTPFlow) -> None:
     if should_bypass_auth(flow):
@@ -177,8 +198,10 @@ def request(flow: http.HTTPFlow) -> None:
         }
     )
 
+
 def load(loader):
     ctx.proxy_session = ProxySession()
+
 
 def done():
     pass

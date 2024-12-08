@@ -12,4 +12,6 @@ pycache/
 #env
 .env
 
+#secret
+identity.py
 password.py
