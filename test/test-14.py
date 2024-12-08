@@ -6,10 +6,8 @@ import time
 from mitmproxy import http, ctx
 from ldap3 import Server, Connection, ALL, SUBTREE
 from typing import Dict, Optional
-from identity import config
 from dotenv import load_dotenv
-
-
+from tqdm import tqdm  # Importing tqdm for progress bar
 
 load_dotenv()
 
@@ -18,21 +16,10 @@ BASE_DN = os.getenv("CONF_BASE_DN")
 ADMIN_DN = os.getenv("CONF_ADMIN_DN")
 ADMIN_PASSWORD = os.getenv("CONF_ADMIN_PASSWORD")
 
-# LDAP_SERVER = config['LDAP_SERVER']
-# BASE_DN = config['BASE_DN']
-# ADMIN_DN = config['ADMIN_DN']
-# ADMIN_PASSWORD = config['ADMIN_PASSWORD']
-
-# LDAP_SERVER = "ldap://192.168.10.1:389"
-# BASE_DN = "ou=npdco,dc=npdco,dc=local"
-# ADMIN_DN = "CN=***************OU=NPDCO,DC=npdco,DC=local"
-# ADMIN_PASSWORD = '****************'
-
 SESSION_DURATION = 86400
 session_store: Dict[str, dict] = {}
 
-BYPASS_EXTENSIONS = {'.css', '.js', '.jpg', '.jpeg',
-                     '.png', '.gif', '.ico', '.woff', '.woff2'}
+BYPASS_EXTENSIONS = {'.css', '.js', '.jpg', '.jpeg', '.png', '.gif', '.ico', '.woff', '.woff2'}
 
 USER_CONFIGS = {
     "chary.p": {
@@ -53,10 +40,11 @@ USER_CONFIGS = {
     }
 }
 
-
 class ProxySession:
     def __init__(self):
         self.authenticated_ips: Dict[str, dict] = {}
+        self.downloads = {}
+        self.download_bars = {}
 
     def get_session(self, client_ip: str) -> Optional[dict]:
         if client_ip in self.authenticated_ips:
@@ -70,7 +58,7 @@ class ProxySession:
     def create_session(self, client_ip: str, username: str) -> None:
         self.authenticated_ips[client_ip] = {
             "username": username,
-            "created_at": time.time (),
+            "created_at": time.time(),
             "expires_at": time.time() + SESSION_DURATION
         }
 
@@ -80,6 +68,31 @@ class ProxySession:
                        if current_time > session["expires_at"]]
         for ip in expired_ips:
             del self.authenticated_ips[ip]
+
+    def start_download(self, url: str, total_size: int) -> None:
+        """Initialize a tqdm progress bar for the download"""
+        self.download_bars[url] = tqdm(total=total_size, unit='B', unit_scale=True, desc=f"Downloading {url}")
+
+    def update_download(self, url: str, chunk_size: int) -> None:
+        """Update the progress of the download"""
+        if url in self.download_bars:
+            self.download_bars[url].update(chunk_size)
+
+    def get_download_progress(self, url: str) -> Optional[Dict[str, int]]:
+        """Retrieve the current download progress"""
+        if url in self.download_bars:
+            bar = self.download_bars[url]
+            return {
+                "downloaded": bar.n,
+                "total_size": bar.total,
+                "progress": bar.n / bar.total * 100
+            }
+        return None
+
+    def stop_download(self, url: str) -> None:
+        """Stop tracking the download by closing the progress bar"""
+        if url in self.download_bars:
+            self.download_bars[url].close()
 
 
 def authenticate_with_ldap(username: str, password: str) -> bool:
@@ -93,7 +106,6 @@ def authenticate_with_ldap(username: str, password: str) -> bool:
         admin_conn.search(BASE_DN, search_filter, SUBTREE)
 
         if not admin_conn.entries:
-            print('no data!!!!')
             return False
 
         user_dn = admin_conn.entries[0].entry_dn
@@ -117,7 +129,6 @@ def extract_credentials(auth_header: str) -> tuple[Optional[str], Optional[str]]
 
 
 def should_bypass_auth(flow: http.HTTPFlow) -> bool:
-    """Check if the request should bypass authentication"""
     url = flow.request.pretty_url.lower()
     return any(url.endswith(ext) for ext in BYPASS_EXTENSIONS)
 
@@ -138,72 +149,4 @@ def process_user_restrictions(flow: http.HTTPFlow, username: str) -> Optional[ht
             {"Content-Type": "text/plain"}
         )
 
-    if allowed_domains:
-        if not any(domain in flow.request.host for domain in allowed_domains):
-            return None
-
-        match = re.search(r'\.([a-zA-Z0-9]+)(\?.*)?$', flow.request.pretty_url)
-        if match and match.group(1).lower() in blocked_extensions:
-            return http.Response.make(
-                403,
-                config["message"],
-                {"Content-Type": "text/plain"}
-            )
-
-    return None
-
-
-proxy_session = ProxySession()
-
-
-def request(flow: http.HTTPFlow) -> None:
-    if should_bypass_auth(flow):
-        return
-
-    client_ip = flow.client_conn.peername[0]
-    session = proxy_session.get_session(client_ip)
-    if session:
-        username = session["username"]
-        response = process_user_restrictions(flow, username)
-        if response:
-            flow.response = response
-        return
-
-    auth_header = flow.request.headers.get("Authorization")
-    if not auth_header:
-        flow.response = http.Response.make(
-            401,
-            b"Authentication required",
-            {
-                "WWW-Authenticate": 'Basic realm="LDAP Authentication"',
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache"
-            }
-        )
-        return
-
-    username, password = extract_credentials(auth_header)
-    if username and password and authenticate_with_ldap(username, password):
-        proxy_session.create_session(client_ip, username)
-        response = process_user_restrictions(flow, username)
-        if response:
-            flow.response = response
-        return
-
-    flow.response = http.Response.make(
-        401,
-        b"Invalid credentials",
-        {
-            "WWW-Authenticate": 'Basic realm="LDAP Authentication"',
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache"
-        }
-    )
-
-
-def load(loader):
-    ctx.proxy_session = ProxySession()
-
-
-def done():
-    pass
+    
